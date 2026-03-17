@@ -7,11 +7,11 @@ Nix flake packaging **Logseq Desktop** (nightly) and **Logseq CLI** (DB graph ma
 
 ## Packages
 
-| Package      | Binary       | Description                                                      |
-| ------------ | ------------ | ---------------------------------------------------------------- |
-| `logseq`     | `logseq`     | Desktop app (Linux: FHS wrapper; macOS: native `.app` bundle)    |
-| `logseq-cli` | `logseq-cli` | CLI for DB graphs: query, export, MCP server                     |
-| `default`    | both         | Desktop app + CLI combined                                       |
+| Package      | Binary       | Description                                                   |
+| ------------ | ------------ | ------------------------------------------------------------- |
+| `logseq`     | `logseq`     | Desktop app (Linux: FHS wrapper; macOS: native `.app` bundle) |
+| `logseq-cli` | `logseq-cli` | CLI for DB graphs: query, export, MCP server                  |
+| `default`    | both         | Desktop app + CLI combined                                    |
 
 ## Installation
 
