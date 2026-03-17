@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-Nix flake packaging two Logseq outputs: the **desktop app** (nightly Electron builds) and the **CLI** (DB graph management / MCP server). A GitHub Actions workflow builds Logseq from upstream source daily and publishes tarballs that the flake consumes. Linux x86_64 only.
+Nix flake packaging two Logseq outputs: the **desktop app** (nightly Electron builds) and the **CLI** (DB graph management / MCP server). A GitHub Actions workflow builds Logseq from upstream source daily and publishes tarballs that the flake consumes. Supports Linux x86_64 and macOS ARM64 (Apple Silicon).
 
 ## Common Commands
 
@@ -36,15 +36,16 @@ nix develop -c pre-commit run --all-files
 
 `flake.nix` produces three package outputs (`logseq`, `logseq-cli`, `default`→both) plus an overlay (`overlays.default`) and checks that verify each binary is executable. The formatter is `nixfmt`. The desktop derivation is named `logseqDesktop` internally (pname `logseq-desktop`) but exposed as `packages.logseq`; the `default` output is a `symlinkJoin` of both desktop and CLI.
 
-### Desktop App — Manifest-Driven FHS Wrapper
+### Desktop App — Manifest-Driven Platform-Aware Packaging
 
 The desktop package does **not** build Logseq from source. Instead:
 
-1. `data/logseq-nightly.json` stores the tarball URL, SRI hash, version, and git rev. This manifest is auto-committed by the nightly CI workflow.
-2. `lib/loadManifest.nix` validates the manifest (required keys: `tag`, `publishedAt`, `assetUrl`, `assetSha256`, `logseqRev`, `logseqVersion`; hash must start with `sha256-`).
-3. `flake.nix` fetches the tarball via `fetchzip`, extracts it into `logseqTree`, then wraps it in a `buildFHSEnv` with libraries from `lib/runtime-libs.nix`.
-4. A `launcher` shell script (inline in `flake.nix`) auto-detects NVIDIA vs Mesa via `/run/opengl-driver` and exports GPU environment variables before execing the FHS wrapper.
-5. The final `stdenv.mkDerivation` assembles the launcher, desktop entry, and icon into one package. `passthru.fhsWithPackages` lets consumers extend the FHS.
+1. `data/logseq-nightly.json` stores the tarball URL, SRI hash, version, and git rev. An optional `assets` map provides per-platform URLs/hashes (keys are Nix system identifiers like `x86_64-linux`, `aarch64-darwin`). This manifest is auto-committed by the nightly CI workflow.
+2. `lib/loadManifest.nix` validates the manifest (required keys: `tag`, `publishedAt`, `assetUrl`, `assetSha256`, `logseqRev`, `logseqVersion`; hash must start with `sha256-`). When `assets` is present, each entry is validated for `url` and `sha256` keys.
+3. `flake.nix` selects the platform-specific asset from `assets.${system}` (falling back to flat `assetUrl`/`assetSha256`), fetches it via `fetchzip`, and extracts it into `logseqTree`.
+4. **Linux (`logseqDesktopLinux`)**: wraps in a `buildFHSEnv` with libraries from `lib/runtime-libs.nix`. A `launcher` shell script auto-detects NVIDIA vs Mesa via `/run/opengl-driver` and exports GPU environment variables. `passthru.fhsWithPackages` lets consumers extend the FHS.
+5. **macOS (`logseqDesktopDarwin`)**: installs the `Logseq.app` bundle into `$out/Applications/` and creates a `makeBinaryWrapper` at `$out/bin/logseq`.
+6. `logseqDesktop` dispatches to the correct derivation based on `stdenv.hostPlatform.isDarwin`. Linux-only `let` bindings (FHS, runtime-libs, GPU launcher) are never evaluated on Darwin due to Nix laziness.
 
 ### CLI — Yarn/Node Build from Source
 
@@ -52,7 +53,7 @@ The desktop package does **not** build Logseq from source. Instead:
 
 1. `fetchFromGitHub` clones the full repo; `sourceRoot` is set to `deps/` because the CLI depends on sibling packages (outliner, db, graph-parser, common).
 2. `fetchYarnDeps` creates a fixed-output derivation for offline yarn install (the `postPatch` cd's into `deps/cli` where `yarn.lock` lives).
-3. Native deps (`python3`, `gcc`, `pkg-config`, `sqlite`) are needed to rebuild the `better-sqlite3` native addon.
+3. Native deps (`python3`, `gcc` (Linux only — macOS uses clang from stdenv), `pkg-config`, `sqlite`) are needed to rebuild the `better-sqlite3` native addon.
 4. A `substituteInPlace` patches `nbb_deps.js` to respect `NBB_CACHE_DIR` env var so the Nix store stays read-only.
 5. A wrapper script sets `NBB_CACHE_DIR` to `$XDG_CACHE_HOME/logseq-cli/nbb/` before invoking `node cli.mjs`.
 
@@ -60,7 +61,7 @@ The desktop package does **not** build Logseq from source. Instead:
 
 ## CI Workflows
 
-- **`nightly.yml`** — Daily cron: clones upstream Logseq, compiles ClojureScript + Electron, packages tarball, creates GitHub release, updates `data/logseq-nightly.json`, runs `nix fmt` and `nix flake check`.
+- **`nightly.yml`** — Daily cron: `build-linux` job clones upstream Logseq, compiles ClojureScript + Electron, packages Linux x64 tarball. `publish-release` job also downloads the macOS ARM64 artifact from upstream's `Build-Desktop-Release` workflow (no macOS runner needed), uploads both to a GitHub release, updates `data/logseq-nightly.json` (including per-platform `assets` map), runs `nix fmt` and `nix flake check`.
 - **`validate.yml`** — Every push/PR: `nix fmt -- --check .` and `nix flake check`.
 - **`flake-update.yml`** — Weekly cron (Sunday): `nix flake update`, format, check, auto-commit.
 

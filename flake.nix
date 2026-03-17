@@ -38,23 +38,45 @@
           inherit lib;
           manifestPath = ./data/logseq-nightly.json;
         };
+        isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
         runtimeLibs = import ./lib/runtime-libs.nix;
         runtimeLibList = runtimeLibs pkgs;
         runtimeLibPath = lib.makeLibraryPath runtimeLibList;
+        platformAsset =
+          if builtins.hasAttr "assets" manifest && builtins.hasAttr system manifest.assets then
+            manifest.assets.${system}
+          else
+            {
+              url = manifest.assetUrl;
+              sha256 = manifest.assetSha256;
+            };
         payload = pkgs.fetchzip {
-          url = manifest.assetUrl;
-          hash = manifest.assetSha256;
+          url = platformAsset.url;
+          hash = platformAsset.sha256;
           stripRoot = false;
         };
-        logseqTree = pkgs.runCommand "logseq-tree" { } ''
-          mkdir -p $out/share/logseq
-          src="${payload}"
-          if [ -d "$src/Logseq-linux-x64" ]; then
-            cp -r "$src/Logseq-linux-x64/." $out/share/logseq/
+        logseqTree = pkgs.runCommand "logseq-tree" { } (
+          if isDarwin then
+            ''
+              mkdir -p $out/share/logseq
+              src="${payload}"
+              if [ -d "$src/Logseq.app" ]; then
+                cp -r "$src/Logseq.app" $out/share/logseq/Logseq.app
+              else
+                cp -r "$src/." $out/share/logseq/
+              fi
+            ''
           else
-            cp -r "$src/." $out/share/logseq/
-          fi
-        '';
+            ''
+              mkdir -p $out/share/logseq
+              src="${payload}"
+              if [ -d "$src/Logseq-linux-x64" ]; then
+                cp -r "$src/Logseq-linux-x64/." $out/share/logseq/
+              else
+                cp -r "$src/." $out/share/logseq/
+              fi
+            ''
+        );
         fhsBase =
           {
             additionalPkgs ? (_pkgs: [ ]),
@@ -213,7 +235,7 @@
             cliYarnDepsHash
             ;
         };
-        logseqDesktop = pkgs.stdenv.mkDerivation {
+        logseqDesktopLinux = pkgs.stdenv.mkDerivation {
           pname = "logseq-desktop";
           version = manifest.logseqVersion;
           dontUnpack = true;
@@ -237,6 +259,25 @@
             fhsWithPackages = fhsBase;
           };
         };
+        logseqDesktopDarwin = pkgs.stdenv.mkDerivation {
+          pname = "logseq-desktop";
+          version = manifest.logseqVersion;
+          dontUnpack = true;
+          nativeBuildInputs = [ pkgs.makeBinaryWrapper ];
+          buildCommand = ''
+            mkdir -p $out/Applications $out/bin
+            cp -r ${logseqTree}/share/logseq/Logseq.app $out/Applications/Logseq.app
+            makeBinaryWrapper $out/Applications/Logseq.app/Contents/MacOS/Logseq $out/bin/logseq
+          '';
+          meta = with lib; {
+            description = "Logseq nightly desktop app";
+            homepage = "https://github.com/logseq/logseq";
+            license = licenses.agpl3Plus;
+            platforms = platforms.darwin;
+            mainProgram = "logseq";
+          };
+        };
+        logseqDesktop = if isDarwin then logseqDesktopDarwin else logseqDesktopLinux;
       in
       {
         packages = {

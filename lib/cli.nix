@@ -72,9 +72,8 @@ let
       yarnConfigHook
       python3
       gnumake
-      gcc
       pkg-config
-    ];
+    ] ++ lib.optionals stdenv.hostPlatform.isLinux [ gcc ];
 
     buildInputs = [ sqlite ];
 
@@ -141,6 +140,6 @@ stdenv.mkDerivation {
     homepage = "https://github.com/logseq/logseq/tree/master/deps/cli";
     license = lib.licenses.agpl3Plus;
     mainProgram = "logseq-cli";
-    platforms = lib.platforms.linux;
+    platforms = lib.platforms.linux ++ lib.platforms.darwin;
   };
 }

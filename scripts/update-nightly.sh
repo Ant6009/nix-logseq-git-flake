@@ -4,9 +4,13 @@
 # Required environment variables:
 #   LOGSEQ_REV      — upstream commit SHA
 #   LOGSEQ_VERSION  — version string (e.g. 2.0.0-alpha+nightly.20260127)
-#   ASSET_URL       — tarball download URL
-#   ASSET_HASH      — SRI hash of the desktop tarball
+#   ASSET_URL       — tarball download URL (Linux x86_64)
+#   ASSET_HASH      — SRI hash of the desktop tarball (Linux x86_64)
 #   NIGHTLY_TAG     — release tag (e.g. nightly-20260127)
+#
+# Optional environment variables (macOS ARM64):
+#   DARWIN_ASSET_URL  — zip download URL (Darwin arm64)
+#   DARWIN_ASSET_HASH — SRI hash of the Darwin zip
 
 set -euo pipefail
 
@@ -45,11 +49,29 @@ echo "::endgroup::"
 # ── Phase 4: Write manifest with placeholder yarn hash ──────────────
 echo "::group::Phase 4: Write manifest (placeholder yarn hash)"
 PLACEHOLDER="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+# Build per-platform assets map
+ASSETS_JSON=$(jq -n \
+  --arg linux_url "$ASSET_URL" \
+  --arg linux_sha "$ASSET_HASH" \
+  '{ "x86_64-linux": { url: $linux_url, sha256: $linux_sha } }')
+
+if [ -n "${DARWIN_ASSET_URL:-}" ] && [ -n "${DARWIN_ASSET_HASH:-}" ]; then
+  ASSETS_JSON=$(echo "$ASSETS_JSON" | jq \
+    --arg darwin_url "$DARWIN_ASSET_URL" \
+    --arg darwin_sha "$DARWIN_ASSET_HASH" \
+    '. + { "aarch64-darwin": { url: $darwin_url, sha256: $darwin_sha } }')
+  echo "  Darwin asset included"
+else
+  echo "  Darwin asset not available (DARWIN_ASSET_URL/DARWIN_ASSET_HASH not set)"
+fi
+
 jq -n \
   --arg tag "$NIGHTLY_TAG" \
   --arg publishedAt "$PUBLISHED_AT" \
   --arg assetUrl "$ASSET_URL" \
   --arg assetSha256 "$ASSET_HASH" \
+  --argjson assets "$ASSETS_JSON" \
   --arg logseqRev "$LOGSEQ_REV" \
   --arg logseqVersion "$LOGSEQ_VERSION" \
   --arg cliSrcHash "$CLI_SRC_HASH" \
@@ -60,6 +82,7 @@ jq -n \
     publishedAt: $publishedAt,
     assetUrl: $assetUrl,
     assetSha256: $assetSha256,
+    assets: $assets,
     logseqRev: $logseqRev,
     logseqVersion: $logseqVersion,
     cliSrcHash: $cliSrcHash,
@@ -107,6 +130,10 @@ echo "  tag:              $NIGHTLY_TAG"
 echo "  logseqRev:        $LOGSEQ_REV"
 echo "  logseqVersion:    $LOGSEQ_VERSION"
 echo "  assetSha256:      $ASSET_HASH"
+if [ -n "${DARWIN_ASSET_URL:-}" ]; then
+  echo "  darwinAssetUrl:   $DARWIN_ASSET_URL"
+  echo "  darwinAssetHash:  $DARWIN_ASSET_HASH"
+fi
 echo "  cliSrcHash:       $CLI_SRC_HASH"
 echo "  cliYarnDepsHash:  $YARN_HASH"
 echo "  cliVersion:       $CLI_VERSION"

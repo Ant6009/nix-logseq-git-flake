@@ -21,7 +21,7 @@ env:
   LOGSEQ_BRANCH: ${{ github.event.inputs.logseq_branch || 'master' }}
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
@@ -129,7 +129,7 @@ jobs:
 
   publish-release:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-linux
     concurrency:
       group: repo-main-writer
       cancel-in-progress: false
@@ -154,27 +154,105 @@ jobs:
           name: nix-logseq-git-flake
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
+      - name: Download Darwin arm64 artifact from upstream
+        id: darwin
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Fetching latest successful Build-Desktop-Release run from logseq/logseq..."
+
+          # Find the latest successful workflow run
+          run_id=$(gh api \
+            "repos/logseq/logseq/actions/workflows/build-desktop-release.yml/runs?status=success&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')
+
+          if [ -z "$run_id" ]; then
+            echo "No successful Build-Desktop-Release run found"
+            exit 1
+          fi
+          echo "Found run: $run_id"
+
+          # Find the darwin-arm64 artifact
+          artifact_id=$(gh api \
+            "repos/logseq/logseq/actions/runs/${run_id}/artifacts" \
+            --jq '.artifacts[] | select(.name == "logseq-darwin-arm64-builds") | .id // empty')
+
+          if [ -z "$artifact_id" ]; then
+            echo "No logseq-darwin-arm64-builds artifact found in run $run_id"
+            exit 1
+          fi
+          echo "Found artifact: $artifact_id"
+
+          # Download and extract the outer artifact zip
+          mkdir -p darwin-builds
+          gh api \
+            "repos/logseq/logseq/actions/artifacts/${artifact_id}/zip" \
+            > darwin-builds/artifact.zip
+          (cd darwin-builds && unzip -o artifact.zip)
+          rm -f darwin-builds/artifact.zip
+
+          # Find the inner .zip file containing the .app bundle
+          darwin_zip=$(find darwin-builds -name '*.zip' -print -quit)
+          if [ -z "$darwin_zip" ]; then
+            # If no inner zip, look for dmg and skip, or use directory as-is
+            echo "No .zip found in artifact; checking for usable content..."
+            ls -la darwin-builds/
+            exit 1
+          fi
+
+          version="${{ needs.build-linux.outputs.version }}"
+          final_name="logseq-darwin-arm64-${version}.zip"
+          mv "$darwin_zip" "builds/${final_name}"
+
+          # Compute SRI hash — extract the zip and hash the directory
+          tmpdir=$(mktemp -d)
+          unzip -q "builds/${final_name}" -d "$tmpdir"
+          darwin_hash=$(nix hash path --type sha256 --sri "$tmpdir")
+          rm -rf "$tmpdir"
+
+          echo "darwin_hash=$darwin_hash" >> "$GITHUB_OUTPUT"
+          echo "darwin_zip=${final_name}" >> "$GITHUB_OUTPUT"
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "Darwin artifact ready: ${final_name} (hash: ${darwin_hash})"
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="nightly-${{ needs.build.outputs.datestring }}"
-          rev="${{ needs.build.outputs.revision }}"
+          tag="nightly-${{ needs.build-linux.outputs.datestring }}"
+          rev="${{ needs.build-linux.outputs.revision }}"
           rev_short="${rev:0:7}"
+
+          # Collect release assets
+          assets=("builds/logseq-linux-x64-${{ needs.build-linux.outputs.version }}.tar.gz")
+          if [ "${{ steps.darwin.outputs.available }}" = "true" ]; then
+            assets+=("builds/${{ steps.darwin.outputs.darwin_zip }}")
+          fi
+
           gh release delete "$tag" -y || true
-          gh release create "$tag" builds/logseq-linux-x64-${{ needs.build.outputs.version }}.tar.gz \
+          gh release create "$tag" "${assets[@]}" \
             --title "logseq-nightly-${rev_short}" \
             --notes "Automated nightly build for commit [${rev_short}](https://github.com/logseq/logseq/commit/${rev})." \
             --target main
 
       - name: Update nightly manifest and CLI hashes
         env:
-          LOGSEQ_REV: ${{ needs.build.outputs.revision }}
-          LOGSEQ_VERSION: ${{ needs.build.outputs.version }}
+          LOGSEQ_REV: ${{ needs.build-linux.outputs.revision }}
+          LOGSEQ_VERSION: ${{ needs.build-linux.outputs.version }}
           ASSET_URL: >-
-            https://github.com/${{ github.repository }}/releases/download/nightly-${{ needs.build.outputs.datestring }}/logseq-linux-x64-${{ needs.build.outputs.version }}.tar.gz
-          ASSET_HASH: ${{ needs.build.outputs.hash }}
-          NIGHTLY_TAG: nightly-${{ needs.build.outputs.datestring }}
+            https://github.com/${{ github.repository }}/releases/download/nightly-${{ needs.build-linux.outputs.datestring }}/logseq-linux-x64-${{ needs.build-linux.outputs.version }}.tar.gz
+          ASSET_HASH: ${{ needs.build-linux.outputs.hash }}
+          NIGHTLY_TAG: nightly-${{ needs.build-linux.outputs.datestring }}
+          DARWIN_ASSET_URL: >-
+            ${{ steps.darwin.outputs.available == 'true'
+                && format('https://github.com/{0}/releases/download/nightly-{1}/{2}',
+                    github.repository,
+                    needs.build-linux.outputs.datestring,
+                    steps.darwin.outputs.darwin_zip)
+                || '' }}
+          DARWIN_ASSET_HASH: ${{ steps.darwin.outputs.darwin_hash || '' }}
         run: bash scripts/update-nightly.sh
 
       - name: Configure git
@@ -200,9 +278,9 @@ jobs:
           fi
 
   report-failure:
-    if: ${{ always() && github.event_name == 'schedule' && (needs.build.result != 'success' || needs['publish-release'].result != 'success') }}
+    if: ${{ always() && github.event_name == 'schedule' && (needs.build-linux.result != 'success' || needs['publish-release'].result != 'success') }}
     needs:
-      - build
+      - build-linux
       - publish-release
     runs-on: ubuntu-latest
     steps:
@@ -212,7 +290,7 @@ jobs:
           ISSUE_TITLE: Nightly build automation failing
           ISSUE_MARKER: <!-- nightly-build-failure -->
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_RESULT: ${{ needs.build-linux.result }}
           PUBLISH_RESULT: ${{ needs['publish-release'].result }}
         with:
           script: |
@@ -274,9 +352,9 @@ jobs:
             }
 
   report-recovery:
-    if: ${{ always() && github.event_name == 'schedule' && needs.build.result == 'success' && needs['publish-release'].result == 'success' }}
+    if: ${{ always() && github.event_name == 'schedule' && needs.build-linux.result == 'success' && needs['publish-release'].result == 'success' }}
     needs:
-      - build
+      - build-linux
       - publish-release
     runs-on: ubuntu-latest
     steps:

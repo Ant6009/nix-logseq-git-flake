@@ -2,16 +2,16 @@
 
 Nix flake packaging **Logseq Desktop** (nightly) and **Logseq CLI** (DB graph management / MCP server) from upstream `master`.
 
-> [!WARNING]
-> Linux x86_64 only. [Open an issue](https://github.com/Bad3r/nix-logseq-git-flake/issues) to request other platforms.
+> **Supported platforms:** Linux x86_64, macOS ARM64 (Apple Silicon).
+> On macOS the desktop app installs as a native `.app` bundle (no FHS wrapper). You may need to run `xattr -cr` on the app if Gatekeeper blocks it.
 
 ## Packages
 
-| Package      | Binary       | Description                                  |
-| ------------ | ------------ | -------------------------------------------- |
-| `logseq`     | `logseq`     | Desktop app with FHS wrapper                 |
-| `logseq-cli` | `logseq-cli` | CLI for DB graphs: query, export, MCP server |
-| `default`    | both         | Desktop app + CLI combined                   |
+| Package      | Binary       | Description                                                      |
+| ------------ | ------------ | ---------------------------------------------------------------- |
+| `logseq`     | `logseq`     | Desktop app (Linux: FHS wrapper; macOS: native `.app` bundle)    |
+| `logseq-cli` | `logseq-cli` | CLI for DB graphs: query, export, MCP server                     |
+| `default`    | both         | Desktop app + CLI combined                                       |
 
 ## Installation
 
