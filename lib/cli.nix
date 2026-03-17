@@ -15,6 +15,8 @@
   gcc,
   pkg-config,
   sqlite,
+  darwin ? { },
+  xcbuild ? null,
   # Manifest-driven parameters (passed from flake.nix)
   logseqRev,
   cliSrcHash,
@@ -67,13 +69,19 @@ let
     inherit version src;
     sourceRoot = "${src.name}/deps";
 
-    nativeBuildInputs = [
-      nodejs_22
-      yarnConfigHook
-      python3
-      gnumake
-      pkg-config
-    ] ++ lib.optionals stdenv.hostPlatform.isLinux [ gcc ];
+    nativeBuildInputs =
+      [
+        nodejs_22
+        yarnConfigHook
+        python3
+        gnumake
+        pkg-config
+      ]
+      ++ lib.optionals stdenv.hostPlatform.isLinux [ gcc ]
+      ++ lib.optionals stdenv.hostPlatform.isDarwin [
+        darwin.cctools
+        xcbuild
+      ];
 
     buildInputs = [ sqlite ];
 
