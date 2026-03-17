@@ -212,9 +212,11 @@ jobs:
           darwin_hash=$(nix hash path --type sha256 --sri "$tmpdir")
           rm -rf "$tmpdir"
 
-          echo "darwin_hash=$darwin_hash" >> "$GITHUB_OUTPUT"
-          echo "darwin_zip=${final_name}" >> "$GITHUB_OUTPUT"
-          echo "available=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "darwin_hash=$darwin_hash"
+            echo "darwin_zip=${final_name}"
+            echo "available=true"
+          } >> "$GITHUB_OUTPUT"
           echo "Darwin artifact ready: ${final_name} (hash: ${darwin_hash})"
 
       - name: Publish GitHub release

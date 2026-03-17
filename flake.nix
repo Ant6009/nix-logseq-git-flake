@@ -38,7 +38,7 @@
           inherit lib;
           manifestPath = ./data/logseq-nightly.json;
         };
-        isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+        inherit (pkgs.stdenv.hostPlatform) isDarwin;
         runtimeLibs = import ./lib/runtime-libs.nix;
         runtimeLibList = runtimeLibs pkgs;
         runtimeLibPath = lib.makeLibraryPath runtimeLibList;
@@ -51,7 +51,7 @@
               sha256 = manifest.assetSha256;
             };
         payload = pkgs.fetchzip {
-          url = platformAsset.url;
+          inherit (platformAsset) url;
           hash = platformAsset.sha256;
           stripRoot = false;
         };
